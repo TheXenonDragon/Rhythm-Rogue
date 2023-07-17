@@ -27,6 +27,7 @@ public class ChestManager : MonoBehaviour
             xPManager.AddXP(currentXP);
         }
 
-        Destroy(gameObject);
+        currentXP = Random.Range(minXP, maxXP + 1); //  Sets new value for next use.
+        gameObject.SetActive(false);
     }
 }

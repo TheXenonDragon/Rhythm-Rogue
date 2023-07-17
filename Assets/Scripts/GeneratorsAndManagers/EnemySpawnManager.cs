@@ -6,27 +6,22 @@ public class EnemySpawnManager : MonoBehaviour
 {
     //   Enemy Prefabs
     public GameObject skeletonPrefab;
+    public GameObject spiderPrefab;
+    public GameObject giantPrefab;
+    public GameObject bossPrefab;
 
     //  Script and GameObject references
     public BeatController beatController;
     public FloorGenerator floorGenerator;
+    public MapManager mapManager;
     public GameObject player;
 
     //  Spawn Locations
-    private List<List<Vector3>> spawnLocations;
+    private List<Vector2Int> spawnLocations;
+    private List<Vector2Int> mediumSpawnLocations;
 
-    //  Layers to avoid spawning on
-    private string obstacleLayer = "Obstacle";
-    private string wallLayer = "Wall";
-    
-
-    /*  Skeleton    */
-    private float skeletonTileSize = 2f;
-    private float skeletonMoveSpeed = 5f;
-    private float skeletonViewRange = 10f;
-    private float skeletonAttackRange = 2f;
-    private int skeletonHealth = 1;
-    private int skeletonDamage = 1;
+    //  Tile Size
+    private float tileSize = 2f;
 
 
     //  Delay
@@ -41,7 +36,6 @@ public class EnemySpawnManager : MonoBehaviour
     //  Enemy Count
     private const int enemyCountLimitConstant = 10;  //  The max number of enemies able to be spawned.
     private const int enemyIncrementSpeedConstant = 10;
-    private const int currentEnemyCountConstant = 0;
 
     private int enemyCountLimit;
     private int enemyIncrementSpeed;
@@ -49,38 +43,15 @@ public class EnemySpawnManager : MonoBehaviour
 
 
 
-    // Start is called before the first frame update
-    void Start()
-    {
-        Invoke("StartSpawnSequence", 2f);
-
-        delayBetweenSpawns = delayBetweenSpawnsConstant;
-        delayBetweenWaves = delayBetweenWavesConstant;
-        waveDelayDecrementSpeed = waveDelayDecrementSpeedConstant;
-
-        enemyCountLimit = enemyCountLimitConstant;
-        enemyIncrementSpeed = enemyIncrementSpeedConstant;
-        currentEnemyCount = currentEnemyCountConstant;
-    }
-
     public void Reset(int level = 1){
         //  Stop spawning
-        StopCoroutine("SpawnEnemies");
-
+        StopCoroutine(SpawnEnemies());
+        
         //  Delete all current enemies
         for(int i = 0; i < transform.childCount; i++){
             Destroy(transform.GetChild(i).gameObject);
         }
-
-        //  Update stats
-        skeletonTileSize = 2f; // * (level);
-        skeletonMoveSpeed = 5f; // * (level);
-        skeletonViewRange = 10f; // * (level);
-        skeletonAttackRange = 2f; // * (level);
-        skeletonHealth += 1;    //level;
-        skeletonDamage += (level / 7);
-
-
+        
         //  Reset
         delayBetweenSpawns = delayBetweenSpawnsConstant;
         delayBetweenWaves = delayBetweenWavesConstant;
@@ -88,35 +59,49 @@ public class EnemySpawnManager : MonoBehaviour
 
         enemyCountLimit = enemyCountLimitConstant;
         enemyIncrementSpeed = enemyIncrementSpeedConstant;
-        currentEnemyCount = currentEnemyCountConstant;
+        currentEnemyCount = 0;
 
-        Invoke("StartSpawnSequence", 2f);
+        GetSpawnLocations();
+        StartCoroutine(SpawnEnemies());
+    }
+
+    public void SpawnBoss(){
+        Vector2Int spawnPosition = mediumSpawnLocations[GenerateRandomSpawnPosition(UnitSize.Medium)];
+
+        GameObject boss = Instantiate<GameObject>(bossPrefab, new Vector3(spawnPosition.x * tileSize, 0.5f, spawnPosition.y * tileSize), bossPrefab.transform.rotation);
+        BossController bossController = boss.GetComponent<BossController>();
+        boss.name = "Main Boss";
+
+        bossController.StartEnemy(spawnPosition, beatController, mapManager, this, player, tileSize);
+        boss.transform.parent = this.transform;
+    }
+
+    private void GetSpawnLocations(){
+        spawnLocations = mapManager.GetSpawnLocations();
+        mediumSpawnLocations = mapManager.GetMediumSpawnLocations();
+    }
+
+    public Vector2Int GetNewDestination(){
+        return spawnLocations[Random.Range(0, spawnLocations.Count)];
     }
 
     public IEnumerator SpawnEnemies(){
-        RaycastHit hit;
-        float rayDistance = 100;
-        int chamberIndex;
         int tileIndex;
+        UnitSize unitSize;
 
         while(true){
             while(currentEnemyCount < enemyCountLimit){
+                unitSize = EnemySelector();
+
                 //  Randomize the spawn location
-                chamberIndex = Random.Range(0, spawnLocations.Count);
-                tileIndex = Random.Range(0, spawnLocations[chamberIndex].Count);
+                tileIndex = GenerateRandomSpawnPosition(unitSize);
 
-                //  Ensure nothing is blocking spawn location
-                if (tileIndex < spawnLocations[chamberIndex].Count && Physics.Raycast(spawnLocations[chamberIndex][tileIndex] + (Vector3.up * rayDistance / 2f), Vector3.down, out hit, rayDistance)){
-                    //  If there is no wall or obstacle in the spawn location, spawn enemy.
-                    if(hit.transform.gameObject.layer != LayerMask.NameToLayer(obstacleLayer) && hit.transform.gameObject.layer != LayerMask.NameToLayer(wallLayer)){
-                        //  Spawn then wait.
-                        SpawnSkeleton(spawnLocations[chamberIndex][tileIndex], skeletonTileSize, skeletonMoveSpeed, skeletonHealth, skeletonDamage, skeletonViewRange, skeletonAttackRange);
-                        currentEnemyCount++;
-                        yield return new WaitForSeconds(delayBetweenSpawns);
-                    }
-                }
+                //  If there is no wall or obstacle in the spawn location, spawn enemy.
+                //  Spawn then wait.
+                SpawnEnemy(tileIndex, unitSize);
+                yield return new WaitForSeconds(delayBetweenSpawns);
             }
-
+            
             //  Delay between waves
             yield return new WaitForSeconds(delayBetweenWaves);
             delayBetweenWaves -= waveDelayDecrementSpeed;
@@ -124,34 +109,93 @@ public class EnemySpawnManager : MonoBehaviour
         }
     }
 
-    public void SpawnSkeleton(Vector3 spawnPosition, float tileSize, float moveSpeed, int health, int damage, float viewRange, float attackRange){
-        GameObject skeleton = Instantiate<GameObject>(skeletonPrefab, spawnPosition, skeletonPrefab.transform.rotation);
-        SkeletonController skeletonController = skeleton.GetComponent<SkeletonController>();
+    private int GenerateRandomSpawnPosition(UnitSize unitSize){
+        //  ERROR Warning: This method may pose an issue of an infinite loop if there are no available spawn locations.
 
-        skeletonController.StartEnemy(spawnPosition + Vector3.up, beatController, player, tileSize, moveSpeed, health, damage, viewRange, attackRange);
-        skeleton.transform.parent = this.transform;
-    }
+        int tileIndex;
+        List<Vector2Int> tempSpawnLocations;
+        System.Func<Vector2Int, bool> CheckPos = mapManager.PositionIsEmpty;
 
-    private void GetSpawnLocations(){
-        spawnLocations = floorGenerator.GetAvailableDungeonTileLocations();
-        float distance = 100;
+        if(unitSize == UnitSize.Regular){
+            tempSpawnLocations = spawnLocations;
 
-        //  Remove locations that are filled by obstacles
-        RaycastHit hit;
-        for(int chamberIndex = 0; chamberIndex < spawnLocations.Count; chamberIndex++){
-            for(int tileIndex = spawnLocations[chamberIndex].Count - 1; tileIndex >= 0; tileIndex--){    
-                if (Physics.Raycast(spawnLocations[chamberIndex][tileIndex] + (Vector3.up * distance), Vector3.down, out hit, distance)){
-                    //  Remove spawn locations blocked by obstacles and walls
-                    if(hit.transform.gameObject.layer == LayerMask.NameToLayer(obstacleLayer) || hit.transform.gameObject.layer == LayerMask.NameToLayer(wallLayer)){
-                        spawnLocations[chamberIndex].RemoveAt(tileIndex);
-                    }
+            while(true){
+                //  Randomize the spawn location
+                tileIndex = Random.Range(0, tempSpawnLocations.Count);
+                if (tileIndex < tempSpawnLocations.Count && CheckPos(tempSpawnLocations[tileIndex])){
+                    return tileIndex;
+                }
+            }
+        }
+        else{
+            tempSpawnLocations = mediumSpawnLocations;
+
+            while(true){
+                //  Randomize the spawn location
+                tileIndex = Random.Range(0, tempSpawnLocations.Count);
+                if (tileIndex < tempSpawnLocations.Count && CheckPos(tempSpawnLocations[tileIndex]) && CheckPos(tempSpawnLocations[tileIndex] + Vector2Int.up) && CheckPos(tempSpawnLocations[tileIndex] + Vector2Int.right) && CheckPos(tempSpawnLocations[tileIndex] + Vector2Int.one)){
+                    return tileIndex;
                 }
             }
         }
     }
-    
-    private void StartSpawnSequence(){
-        GetSpawnLocations();
-        StartCoroutine("SpawnEnemies");
+
+    private UnitSize EnemySelector(){
+        int rngNum = Random.Range(0, 10);
+
+        if(rngNum < 3){
+            return UnitSize.Regular;
+        }
+        else if(rngNum < 7){
+            return UnitSize.Regular;
+        }
+        else{
+            return UnitSize.Medium;
+        }
+    }
+
+    private void SpawnEnemy(int tileIndex, UnitSize unitSize){
+        int rngNum = Random.Range(0, 10);
+
+        if(unitSize == UnitSize.Regular){
+            if(rngNum < 5){
+                SpawnSkeleton(spawnLocations[tileIndex], tileSize);
+            }
+            else{
+                SpawnSpider(spawnLocations[tileIndex], tileSize);
+            }
+        }
+        else{
+            SpawnGiant(mediumSpawnLocations[tileIndex], tileSize);
+        }
+
+        currentEnemyCount++;
+    }
+
+    public void SpawnSkeleton(Vector2Int spawnPosition, float tileSize){
+        GameObject skeleton = Instantiate<GameObject>(skeletonPrefab, new Vector3(spawnPosition.x * tileSize, 0.5f, spawnPosition.y * tileSize), skeletonPrefab.transform.rotation);
+        SkeletonController skeletonController = skeleton.GetComponent<SkeletonController>();
+        skeleton.name = "Skeleton #" + currentEnemyCount;
+
+        skeletonController.StartEnemy(spawnPosition, beatController, mapManager, this, player, tileSize);
+        skeleton.transform.parent = this.transform;
+    }
+
+    public void SpawnSpider(Vector2Int spawnPosition, float tileSize){
+        GameObject spider = Instantiate<GameObject>(spiderPrefab, new Vector3(spawnPosition.x * tileSize, 0.5f, spawnPosition.y * tileSize), spiderPrefab.transform.rotation);
+        SpiderController spiderController = spider.GetComponent<SpiderController>();
+        spider.name = "Spider #" + currentEnemyCount;
+
+        spiderController.StartEnemy(spawnPosition, beatController, mapManager, this, player, tileSize);
+        spider.transform.parent = this.transform;
+    }
+
+    public void SpawnGiant(Vector2Int spawnPosition, float tileSize){
+        GameObject giant = Instantiate<GameObject>(giantPrefab, new Vector3(spawnPosition.x * tileSize, 0.5f, spawnPosition.y * tileSize), giantPrefab.transform.rotation);
+        GiantController giantController = giant.GetComponent<GiantController>();
+        giant.name = "Giant #" + currentEnemyCount;
+
+        giantController.StartEnemy(spawnPosition, beatController, mapManager, this, player, tileSize);
+        giant.transform.parent = this.transform;
     }
 }

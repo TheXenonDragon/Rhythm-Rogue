@@ -7,9 +7,11 @@ public class NavigationUnitController : MonoBehaviour
 {
     NavMeshAgent agent;
     float waitTime = 0.05f;
+    float tileSize = 2.0f;
 
     bool checkpointsAreCalculated = false;
-    private Vector3[] checkpoints; 
+    private Vector3[] checkpoints;
+    private List<Vector2Int> tempCheckpoints;
 
 
 
@@ -20,8 +22,26 @@ public class NavigationUnitController : MonoBehaviour
         checkpoints = null;
     }
 
-    public Vector3[] GetPositionsArray(){
-        return checkpoints;
+    public Vector2Int[] GetCheckpointsArray(){
+        Vector2Int[] gridCheckpoints;
+        tempCheckpoints = new List<Vector2Int>();
+        
+        float minDistanceBetweenCheckpoints = 0.75f;
+
+        //  Convert from Vector3 to Vector2Int
+        for(int i = 0; i < checkpoints.Length; i++){
+            if(i > 0 && Vector3.Distance(checkpoints[i], checkpoints[i - 1]) > minDistanceBetweenCheckpoints){
+                tempCheckpoints.Add(new Vector2Int(Mathf.RoundToInt(checkpoints[i].x / tileSize), Mathf.RoundToInt(checkpoints[i].z / tileSize)));
+            }
+        }
+
+        //  Convert from list to array
+        gridCheckpoints = new Vector2Int[tempCheckpoints.Count];
+        for(int i = 0; i < tempCheckpoints.Count; i++){
+            gridCheckpoints[i] = tempCheckpoints[i];
+        }
+
+        return gridCheckpoints;
     }
 
     public IEnumerator CalculatePositionsArray(Vector3 destination, Vector3 enemyCurrentPosition){

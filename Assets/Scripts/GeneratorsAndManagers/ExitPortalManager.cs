@@ -29,6 +29,6 @@ public class ExitPortalManager : MonoBehaviour
     }
 
     public void NextLevel(){
-        gameManager.CreateNextLevel();
+        gameManager.CreateBossLevel();
     }
 }

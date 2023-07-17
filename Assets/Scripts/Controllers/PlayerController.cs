@@ -10,6 +10,7 @@ public class PlayerController : MonoBehaviour
     //  GameObject references
     public BeatController beatController;
     public CameraController cameraController;
+    public MapManager mapManager;
     private WeaponManager weaponManager;
     private HealthManager healthManager;
 
@@ -17,9 +18,9 @@ public class PlayerController : MonoBehaviour
     public KeyCode cancelMoveKey = KeyCode.LeftShift;
 
     //  Directions
-    private Vector3 moveDirection;
-    private Vector3 defaultDirection;
-    private Vector3 previousMoveDirection;
+    private Vector2Int moveDirection;
+    private Vector2Int defaultDirection;
+    private Vector2Int currentPosition;
 
     //  Distance
     public float tileSize = 1.0f;
@@ -38,9 +39,6 @@ public class PlayerController : MonoBehaviour
     {
         beatController.BeatExecuted += MovePlayer;
         beatController.BeatExecuted += CheckForHealth;
-        previousMoveDirection = new Vector3(0f, 1f, 0f);
-        defaultDirection = Vector3.zero;
-        moveDirection = Vector3.zero;
         healthManager = gameObject.GetComponent<HealthManager>();
         weaponManager = gameObject.GetComponent<WeaponManager>();
     }
@@ -52,24 +50,38 @@ public class PlayerController : MonoBehaviour
         UpdatePosition(false);
     }
 
+
+    //  Management
+    public void Reset(Vector3 moveOffset){
+        currentPosition = new Vector2Int(Mathf.RoundToInt(moveOffset.x), Mathf.RoundToInt(moveOffset.z));
+        mapManager.InsertUnitPosition(currentPosition, currentPosition, gameObject, true);
+        transform.position = (new Vector3(currentPosition.x, 0f, currentPosition.y) * tileSize) + Vector3.up;
+        defaultDirection = Vector2Int.zero;
+        moveDirection = Vector2Int.zero;
+    }
+
+
+    //  Movement control
     private void GetUserInput(){
         if(Input.anyKey){
             float threshold = 0.01f;
 
             float xMovement = Input.GetAxisRaw("Horizontal");
             float yMovement = Input.GetAxisRaw("Vertical");
+
+            Transform camTransform = cameraController.GetTransform();
             
             if(xMovement > threshold){
-                moveDirection = cameraController.GetTransform().right * tileSize;
+                moveDirection = new Vector2Int(Mathf.RoundToInt(camTransform.right.x), Mathf.RoundToInt(camTransform.right.z));
             }
             else if(xMovement < -threshold){
-                moveDirection = -cameraController.GetTransform().right * tileSize;
+                moveDirection = -(new Vector2Int(Mathf.RoundToInt(camTransform.right.x), Mathf.RoundToInt(camTransform.right.z)));
             }
             else if(yMovement > threshold){
-                moveDirection = cameraController.GetTransform().forward * tileSize;
+                moveDirection = new Vector2Int(Mathf.RoundToInt(camTransform.forward.x), Mathf.RoundToInt(camTransform.forward.z));
             }
             else if(yMovement < -threshold){
-                moveDirection = -cameraController.GetTransform().forward * tileSize;
+                moveDirection = -(new Vector2Int(Mathf.RoundToInt(camTransform.forward.x), Mathf.RoundToInt(camTransform.forward.z)));
             }   
         }
 
@@ -79,13 +91,65 @@ public class PlayerController : MonoBehaviour
     }
 
     public void MovePlayer(object sender, EventArgs e){
-        CheckForObstacles(moveDirection);
-        UpdatePosition(true);
-        previousMoveDirection = moveDirection + previousMoveDirection;
-        hasMoved = true;
+        AttemptMove(moveDirection);
+        
+        //UpdatePosition(true);
+        //hasMoved = true;
         CheckForEnemyOverlap();
     }
 
+    private void AttemptMove(Vector2Int direction){
+        //  Attempt to move and check for obstacles.
+
+        if(mapManager.InsertUnitPosition(moveDirection + currentPosition, currentPosition, gameObject, true)){
+            //  Successful move
+            currentPosition = moveDirection + currentPosition;
+            transform.position = (new Vector3(currentPosition.x, 0f, currentPosition.y) * tileSize) + Vector3.up;
+        }
+        else{
+            //  Obstacle or enemy in position
+            RaycastHit hit;
+
+            if(mapManager.PositionHasUnit(currentPosition + direction)){
+                Attack(mapManager.GetUnitGameObject(currentPosition + direction));
+            }
+            else if (Physics.Raycast(transform.position, transform.TransformDirection((new Vector3(direction.x, 0f, direction.y)).normalized), out hit, tileSize))
+            {
+                if(mapManager.PositionHasChest(currentPosition + direction)){
+                    AttemptToOpenChest(hit.transform.gameObject);
+                }
+                else if(mapManager.PositionHasExitPortal(currentPosition + direction)){
+                    AttemptToActivatePortal(hit.transform.gameObject);
+                }
+            }
+            
+            moveDirection = defaultDirection;
+        }
+    }
+
+    private void UpdatePosition(bool finishMove){
+        float threshold = 0.01f;
+
+        Vector3 actualPosition = (new Vector3(currentPosition.x, 0f, currentPosition.y) * tileSize) + Vector3.up;
+
+        if(finishMove){
+            transform.position = actualPosition;
+            hasMoved = false;
+        }
+
+        if(hasMoved){
+            if(Vector3.Distance(transform.position, actualPosition) > threshold) {
+                transform.position = Vector3.Lerp(transform.position, actualPosition, moveSpeed * Time.deltaTime);
+            }
+            else {
+                transform.position = actualPosition;
+                hasMoved = false;
+            }
+        }
+    }
+
+
+    //  Object Activation
     private void AttemptToOpenChest(GameObject possibleChest){
         ChestManager chestManager = possibleChest.GetComponent<ChestManager>();
 
@@ -102,59 +166,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    //  Management
-    public void Reset(){
-        previousMoveDirection = new Vector3(0f, 1f, 0f);
-        defaultDirection = Vector3.zero;
-        moveDirection = Vector3.zero;
-    }
-
-    //  Accessors
-    public Vector3 GetCurrentLocation(){
-        return previousMoveDirection;
-    }
-
-    public Vector3 GetNextMoveDirection(){
-        return moveDirection;
-    }
-
-
-    //  Movement control
-    private void CheckForObstacles(Vector3 direction){
-        RaycastHit hit;
-        if (Physics.Raycast(transform.position, transform.TransformDirection(direction.normalized), out hit, tileSize))
-        {
-            Attack(hit.transform.gameObject);
-            AttemptToOpenChest(hit.transform.gameObject);
-            AttemptToActivatePortal(hit.transform.gameObject);
-            
-            moveDirection = defaultDirection;
-        }
-    }
-
-    private void UpdatePosition(bool finishMove){
-        float threshold = 0.01f;
-
-        if(finishMove){
-            transform.position = previousMoveDirection;
-            hasMoved = false;
-        }
-
-        if(hasMoved){
-            if(Vector3.Distance(transform.position, previousMoveDirection) > threshold) {
-                transform.position = Vector3.Lerp(transform.position, previousMoveDirection, moveSpeed * Time.deltaTime);
-            }
-            else {
-                transform.position = previousMoveDirection;
-                hasMoved = false;
-            }
-        }
-    }
-
 
     //  Attack
     private void Attack(GameObject objectToAttack){
-        if(objectToAttack.layer == LayerMask.NameToLayer(enemyLayer)){
+        if(objectToAttack != null && objectToAttack.layer == LayerMask.NameToLayer(enemyLayer)){
             EnemyController enemyController = objectToAttack.GetComponent<EnemyController>();
             if(enemyController != null){
                 enemyController.AttackedByPlayer();
@@ -163,7 +178,6 @@ public class PlayerController : MonoBehaviour
             weaponManager.DealDamage(objectToAttack, gameObject);
         }
     }
-
     void CheckForEnemyOverlap()
     {
         Collider[] colliders = Physics.OverlapBox(gameObject.transform.position, transform.localScale, Quaternion.identity);
@@ -180,13 +194,11 @@ public class PlayerController : MonoBehaviour
         Invoke("GameOver", 1f);
         Debug.Log($"{gameObject.name} has died.");
     }
-
     public void CheckForHealth(object sender, EventArgs e){
         if(!healthManager.isAlive()){
             Die();
         }
     }
-
     private void GameOver(){
         string saveScoreFilePath = Application.persistentDataPath + "/saveFiles.json";
 
@@ -202,5 +214,11 @@ public class PlayerController : MonoBehaviour
         }
 
         SceneManager.LoadScene(2);
+    }
+
+
+    //  Accessors
+    public Vector2Int GetCurrentLocation(){
+        return currentPosition;
     }
 }

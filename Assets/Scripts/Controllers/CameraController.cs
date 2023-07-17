@@ -9,15 +9,26 @@ public class CameraController : MonoBehaviour
     private KeyCode rotateCameraRightKey = KeyCode.E;
 
     //  Angles
-    private Vector3 destinationAngle = new Vector3(0f, 0f, 0f);
-    
-    private float[] angleList = {0f, 90f, 180f, 270f};
-    private int angleListIndex = 0; 
+    private Vector3 destinationAngle = Vector3.zero;            //  Pivot rotation
+    private float destinationAngleTracker = 0f;                 //  Pivot rotation
+    private Vector3 defaultHingeAngle = Vector3.right * 60f;    //  Hinge rotation
+    private Vector3 blockedHingeAngle = Vector3.right * 90f;    //  Hinge rotation
+
+    //  Positions
+    private Vector3 defaultHingePosition = new Vector3(0f, 10f, -5f);   //  Hinge position
+    private Vector3 blockedHingePosition = new Vector3(0f, 10f, 0f);    //  Hinge position
 
     //  Rotation and Movement management
-    private bool isRotating = false;
-    private float rotationSpeed = 2.5f;
+    private bool isRotatingPivot = false;
+    private bool setHingeToDefault = true;
+    private float rotationSpeed = 3.5f;
     private float movementSpeed = 2.0f;
+
+    //  Raycast
+    public LayerMask layerMask;
+    private string playerLayer = "Player";
+    private RaycastHit hit;
+    private GameObject raycastOrigin;                   //  Origin Position to Check for Obstructions
 
     //  Camera Orientation
     private GameObject cameraOrientation;
@@ -25,28 +36,59 @@ public class CameraController : MonoBehaviour
     //  Player position
     public Transform playerTransform;
 
+    //  Hinge GameObject
+    public GameObject cameraHinge;
+    
+
 
 
     // Start is called before the first frame update
     void Start()
     {
         cameraOrientation = new GameObject("CameraOrientation");
+
+        raycastOrigin = new GameObject("CameraRaycastOrigin");
+        raycastOrigin.transform.position = Camera.main.transform.position;
+        raycastOrigin.transform.parent = transform;
     }
 
     // Update is called once per frame
     void Update()
     {
+        //  Pivot
         GetUserInput();
-        RotateCameraToDestinationAngle();
-        UpdatePosition();
+        UpdatePivotRotation();
+        UpdatePivotPosition();
+
+        //  Hinge
+        CheckForViewObstruction();
+        UpdateHingeRotation();
+        UpdateHingePosition();
     }
 
     public Transform GetTransform(){
+        //  This method is used to get the direction of the camera for the playerController.
+        //  The purpose of this is so that the forward key will always be the forward direction
+        //  of the camera.
+
         cameraOrientation.transform.eulerAngles = destinationAngle;
         return cameraOrientation.transform;
     }
 
-    private void UpdatePosition(){
+    private void GetUserInput(){
+        if(Input.GetKeyDown(rotateCameraLeftKey)){
+            destinationAngleTracker += 90f;
+            destinationAngle = new Vector3(destinationAngle.x, destinationAngleTracker, destinationAngle.z);
+            isRotatingPivot = true;
+        }
+        else if(Input.GetKeyDown(rotateCameraRightKey)){
+            destinationAngleTracker -= 90f;
+            destinationAngle = new Vector3(destinationAngle.x, destinationAngleTracker, destinationAngle.z);
+            isRotatingPivot = true;
+        }
+    }
+
+    private void UpdatePivotPosition(){
         float threshold = 0.01f;
 
         if(playerTransform != null){
@@ -59,38 +101,44 @@ public class CameraController : MonoBehaviour
         }
     }
 
-    private void GetUserInput(){
-        if(Input.GetKeyDown(rotateCameraLeftKey)){
-            angleListIndex++;
-            if(angleListIndex == 4){
-                angleListIndex = 0;
-            }
+    private void UpdatePivotRotation(){
+        float threshold = 0.01f;
 
-            destinationAngle = new Vector3(destinationAngle.x, angleList[angleListIndex], destinationAngle.z);
-            isRotating = true;
-        }
-        else if(Input.GetKeyDown(rotateCameraRightKey)){
-            angleListIndex--;
-            if(angleListIndex == -1){
-                angleListIndex = 3;
+        if(isRotatingPivot){
+            if(Quaternion.Angle(transform.rotation, Quaternion.Euler(destinationAngle)) > threshold) {
+                transform.eulerAngles = new Vector3(0f, Mathf.LerpAngle(transform.eulerAngles.y, destinationAngle.y, rotationSpeed * Time.deltaTime), 0f);
             }
-
-            destinationAngle = new Vector3(destinationAngle.x, angleList[angleListIndex], destinationAngle.z);
-            isRotating = true;
+            else {
+                transform.eulerAngles = destinationAngle;
+                isRotatingPivot = false;
+            }
         }
     }
 
-    private void RotateCameraToDestinationAngle(){
-        float threshold = 0.01f;
+    private void CheckForViewObstruction(){
+        if(Physics.Raycast(raycastOrigin.transform.position, (playerTransform.position - raycastOrigin.transform.position).normalized, out hit, 100f, layerMask) && (!hit.transform.gameObject.layer.Equals(LayerMask.NameToLayer(playerLayer)))){
+            setHingeToDefault = false;
+        }
+        else{
+            setHingeToDefault = true;
+        }
+    }
 
-        if(isRotating){
-            if(Vector3.Distance(transform.eulerAngles, destinationAngle) > threshold) {
-                transform.eulerAngles = Vector3.Lerp(transform.rotation.eulerAngles, destinationAngle, rotationSpeed * Time.deltaTime);
-            }
-            else {    
-                transform.eulerAngles = destinationAngle;
-                isRotating = false;
-            }
+    private void UpdateHingeRotation(){
+        if(setHingeToDefault){
+            cameraHinge.transform.localEulerAngles = new Vector3(Mathf.LerpAngle(cameraHinge.transform.eulerAngles.x, defaultHingeAngle.x, rotationSpeed * Time.deltaTime), 0f, 0f);
+        }
+        else{
+            cameraHinge.transform.localEulerAngles = new Vector3(Mathf.LerpAngle(cameraHinge.transform.eulerAngles.x, blockedHingeAngle.x, rotationSpeed * Time.deltaTime), 0f, 0f);
+        }
+    }
+
+    private void UpdateHingePosition(){
+        if(setHingeToDefault){
+            cameraHinge.transform.localPosition = Vector3.Lerp(cameraHinge.transform.localPosition, defaultHingePosition, rotationSpeed * Time.deltaTime);
+        }
+        else{
+            cameraHinge.transform.localPosition = Vector3.Lerp(cameraHinge.transform.localPosition, blockedHingePosition, rotationSpeed * Time.deltaTime);
         }
     }
 }
